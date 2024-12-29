@@ -35,7 +35,7 @@ If you use this architecture in your research, please cite:
 ```
 @misc{eloisnet2024,
   author = {[Your Name]},
-  title = {EloisNet: Financial Statement Line Item Substitution Network},
+  title = {MaskedInnerAttentionNet: Financial Statement Line Item Substitution Network},
   year = {2024},
   publisher = {GitHub},
   url = {https://github.com/edereynaldesaintmichel/masked_inner_attention}
