@@ -6,11 +6,12 @@ It delivers a 28.5% performance improvement against carrying over the figures fr
 
 ## Architecture Overview
 
-The core innovation of this architecture lies in its ability to handle missing data through an explicit masking mechanism and leverage a learnt covariance-like matrix to fill-in the gaps in the data. Eg guessing Operating Income from EBIT if the former is missing.
+The core innovation of this architecture lies in its ability to handle missing data through an explicit masking mechanism and the use of a learnt covariance-like matrix to fill-in the gaps in the data. Eg guessing Operating Income from EBIT if the former is missing.
 
 The general architecture is somewhat reminiscent of the Transformer's, especially in the use of multiple attention-like heads. It should be noted that the mechanism substantially differs from attention, first because it is only a 2nd order mechanism, and second because that it doesn't involve tokens.
 
 ## Installation
+
 I will upload the requirements.txt soon.
 
 ## Usage
@@ -18,6 +19,7 @@ I will upload the requirements.txt soon.
 Just adapt the train.py file to your needs.
 
 ## Architecture Details
+
 More to come soon on my substack (french -> https://eloidereynal.substack.com , english -> https://eligius.substack.com)
 
 ## Contributing
