@@ -1,4 +1,4 @@
-# EloisNet: Financial Statement Line Item Substitution Network
+# MaskedInnerAttention: Financial Statement Line Item Substitution Network
 
 EloisNet is a novel neural network architecture designed to handle missing data in financial statements by learning substitution patterns between line items. It leverages a unique second-order mechanism to capture relationships between financial statement entries and predict missing values based on available data.
 
