@@ -2,7 +2,7 @@
 
 MaskedInnerAttentionNet is a novel neural network architecture designed to handle missing data in financial statements by learning substitution patterns between line items. It leverages a unique second-order mechanism to capture relationships between financial statement entries and predict missing values based on available data.
 
-It delivers 28.5% performance improvement against carrying over the figures from year n to year n+1.
+It delivers a 28.5% performance improvement against carrying over the figures from year n to year n+1 (Tested on NetIncomeLoss, as shown in the current train.py version).
 
 ## Architecture Overview
 
