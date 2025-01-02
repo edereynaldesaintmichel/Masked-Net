@@ -15,6 +15,8 @@ N_HEAD = 128
 N_LAYER = 1
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+torch.manual_seed(42)
+
 # Fields to predict
 output_vector_fields = ['netincomeloss']
 OUTPUT_SIZE = len(output_vector_fields)
