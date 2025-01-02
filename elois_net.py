@@ -122,7 +122,7 @@ class EloisNet(nn.Module):
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.01)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.0001)
 
     def forward(self, x, targets=None):
         x = self.financial_dropout(x)  # Apply financial dropout during training
