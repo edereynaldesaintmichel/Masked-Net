@@ -84,7 +84,7 @@ class Block(nn.Module):
 
 
 class FinancialDropout(nn.Module):
-    def __init__(self, drop_prob=0.15):
+    def __init__(self, drop_prob):
         super().__init__()
         self.drop_prob = drop_prob
         
@@ -107,7 +107,7 @@ class FinancialDropout(nn.Module):
         return torch.stack([new_values, new_masks], dim=1)
 
 class EloisNet(nn.Module):
-    def __init__(self, n_embd, n_head, n_layer, output_size, dropout_prob=0.2):
+    def __init__(self, n_embd, n_head, n_layer, output_size, dropout_prob=0.4):
         super().__init__()
         self.financial_dropout = FinancialDropout(dropout_prob)
         self.blocks = nn.Sequential(

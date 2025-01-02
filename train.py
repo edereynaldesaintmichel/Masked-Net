@@ -9,7 +9,7 @@ from itertools import islice
 
 # Constants
 BATCH_SIZE = 256
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 4e-3
 NUM_EPOCHS = 10000
 N_HEAD = 128
 N_LAYER = 1
