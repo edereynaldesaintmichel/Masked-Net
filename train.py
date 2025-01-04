@@ -9,16 +9,23 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # Hyperparams
-BATCH_SIZE = 1000
-LEARNING_RATE = 1e-3
-NUM_EPOCHS = 1000
-N_HEAD = 64
+BATCH_SIZE = 128
+LEARNING_RATE = 4e-3
+NUM_EPOCHS = 500
+N_HEAD = 32
 N_LAYER = 1
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_GRAD_NORM = 1e7 # No need for gradient clipping thanks to the LayerNorm at the end of each MultiHead Block
-MAX_DROPOUT_PROB = 0.3
+MAX_GRAD_NORM = 1e7
+MAX_DROPOUT_PROB = 0.1
+NUM_INPUT_FIELDS = 128
+
+
+# Fields to predict:
+OUTPUT_VECTOR_FIELDS = ['netincomeloss']
 
 torch.manual_seed(42)
+
+training_data_std, training_data_mean, gt_std, gt_mean  = 1, 1, 1, 1
 
 
 class EloisHead(nn.Module):
@@ -26,18 +33,19 @@ class EloisHead(nn.Module):
         super().__init__()
         self.head_size = head_size
         self.values_proj = nn.Linear(n_embd, head_size, bias=False)
-        self.cov = nn.Parameter(torch.ones(head_size, head_size)*0.1)
-        self.loadings = nn.Parameter(torch.ones(head_size, head_size)*0.1)
+        self.cov = nn.Parameter(torch.randn(head_size, head_size))
+        self.loadings = nn.Parameter(torch.randn(head_size, head_size))
+        
         # nn.init.xavier_normal_(self.loadings)
         # nn.init.xavier_normal_(self.cov)
 
     def forward(self, x):
-        values = self.values_proj(x[:,0,:])  # (B, hs)
+        values = self.values_proj(x[:,0,:])
         mask = self.values_proj(x[:,1,:]) # (B, hs)
         one_minus_mask = self.values_proj(1-x[:,1,:])
         weighted_avg_coefficients = torch.eye(self.head_size).to(DEVICE) + torch.diag_embed(mask) @ self.cov @ torch.diag_embed(one_minus_mask)# (B, hs, hs)
         
-        # weighted_avg_coefficients = weighted_avg_coefficients / weighted_avg_coefficients.sum(dim = -1, keepdim=True)
+        weighted_avg_coefficients = weighted_avg_coefficients / weighted_avg_coefficients.sum(dim = -1, keepdim=True)
         weighted_avg_coefficients = F.softmax(weighted_avg_coefficients, dim=-1)
         loadings = self.loadings * weighted_avg_coefficients # check if this is a real pointwise operation
         # weighted_avg_coefficients = self.dropout(weighted_avg_coefficients)
@@ -64,7 +72,7 @@ class MultiHeadLayer(nn.Module):
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.dropout(self.proj(out))
-        out = self.layerNorm(out)
+        # out = self.layerNorm(out)
         # out = torch.cat([out, x[:,1,:]], dim=1)
 
         return out
@@ -76,7 +84,7 @@ class FeedFoward(nn.Module):
     def __init__(self, n_embd, dropout = 0.1):
         super().__init__()
         self.net = nn.Sequential(
-            # nn.Linear(n_embd, 1*n_embd),
+            # nn.Linear(n_embd, 2*n_embd),
             nn.GELU(),
             nn.Linear(1*n_embd, n_embd),
             # nn.Dropout(dropout),
@@ -110,9 +118,9 @@ class FinancialDropout(nn.Module):
         super().__init__()
         self.drop_prob = drop_prob
         
-    def forward(self, x, dropout_factor):
+    def forward(self, x, targets, dropout_factor):
         if not self.training:
-            return x
+            return x, targets
             
         # x shape is (batch_size, 2, n_embd)
         values = x[:, 0, :]  # (batch_size, n_embd)
@@ -122,14 +130,15 @@ class FinancialDropout(nn.Module):
         random_mask = (torch.rand_like(values) > self.drop_prob * dropout_factor).float()
         
         # Generate random scaling factors between 0.5 and 2 for each sample in the batch
-        scale_factors = torch.rand(values.shape[0], 1, device=values.device) * 1.5 + 0.5  # generates numbers between 0.5 and 2
+        scale_factors = torch.randn(values.shape[0], 1, device=values.device)  # generates numbers between 0.5 and 2
         
         # Apply dropout and scaling to values, only dropout to masks
         new_values = values * random_mask * scale_factors
+        new_targets = targets * scale_factors
         new_masks = masks * random_mask
         
         # Recombine into original format
-        return torch.stack([new_values, new_masks], dim=1)
+        return torch.stack([new_values, new_masks], dim=1), new_targets
 
 class EloisNet(nn.Module):
     def __init__(self, n_embd, n_head, n_layer, output_size, dropout_prob=0.5):
@@ -139,9 +148,15 @@ class EloisNet(nn.Module):
             *[Block(n_embd, n_head=n_head) for _ in range(n_layer)]
         )
         self.lm_head = nn.Sequential(
-            # nn.Linear(n_embd, 1*n_embd),
+            # nn.Linear(n_embd, 4*n_embd),
+            # nn.GELU(),
+            # nn.Linear(4*n_embd, n_embd),
+            # nn.GELU(),
+            # nn.Linear(n_embd, 4*n_embd),
+            # nn.GELU(),
+            # nn.Linear(4*n_embd, n_embd),
             nn.GELU(),
-            nn.Linear(1*n_embd, output_size)
+            nn.Linear(n_embd, output_size)
         )
         self.apply(self._init_weights)
 
@@ -150,15 +165,15 @@ class EloisNet(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0, std=0.02)
 
     def forward(self, input, targets=None, dropout_factor=1):
-        input = self.financial_dropout(input, dropout_factor)  # Apply financial dropout during training
+        input, targets = self.financial_dropout(input, targets, dropout_factor)  # Apply financial dropout during training
         block_output = self.blocks(input)  # (B,2,n_emb)
-        logits = self.lm_head(block_output[:,0,:])  # (B, output_size)
+        output = self.lm_head(block_output[:,0,:])  # (B, output_size)
 
         if targets is None:
-            return logits, None
+            return output, None
             
-        loss = F.l1_loss(logits, targets) #+ torch.norm((block_output[:,0,:] - input[:,0,:]) * input[:,1,:])
-        return logits, loss
+        loss = F.l1_loss(output, targets) #+ torch.norm((block_output[:,0,:] - input[:,0,:]) * input[:,1,:])
+        return output, loss
 
 def load_data(filepath='financial_statements.json', output_vector_fields=['netincomeloss']):
     # Load financial statements
@@ -179,10 +194,10 @@ def load_data(filepath='financial_statements.json', output_vector_fields=['netin
     sorted_all_fields_counter = dict(
         sorted(all_fields_counter.items(), 
               key=lambda item: item[1], 
-              reverse=True)[:256]
+              reverse=True)[1:NUM_INPUT_FIELDS+1] #The 1 here is because the first field is an index.
     )
 
-    # sorted_all_fields_counter = {"netincomeloss": all_fields_counter["netincomeloss"]} # Just for testing purpose
+    output_data_indices = [list(sorted_all_fields_counter.keys()).index(output_field) + 2*len(sorted_all_fields_counter) for output_field in output_vector_fields]
 
     test_input_data = []
     test_ground_truth = []
@@ -213,7 +228,7 @@ def load_data(filepath='financial_statements.json', output_vector_fields=['netin
             for key in sorted_all_fields_counter:
                 value = train_yearly_report.get(key, 0)
                 try:
-                    value = float(value)/1e9
+                    value = float(value)
                 except:
                     value = 0
                 masking_value = 0 if key in train_yearly_report else 1
@@ -232,9 +247,9 @@ def load_data(filepath='financial_statements.json', output_vector_fields=['netin
             train_value = train_yearly_report.get(key, None)
             test_value = test_yearly_report.get(key, None)
             if train_value is not None:
-                train_value /= 1e9
+                train_value /= 1e0
             if test_value is not None:
-                test_value /= 1e9
+                test_value /= 1e0
             train_output_vector.append(train_value)
             test_output_vector.append(test_value)
         
@@ -244,7 +259,10 @@ def load_data(filepath='financial_statements.json', output_vector_fields=['netin
         test_input_data.append((test_input_vector, test_masking_vector))
         test_ground_truth.append(test_output_vector)
 
-    return train_input_data, train_ground_truth, test_input_data, test_ground_truth, len(train_input_data[0][0])
+    return train_input_data, train_ground_truth, test_input_data, test_ground_truth, len(train_input_data[0][0]), output_data_indices
+
+
+
 
 def prepare_sub_data(input_data, ground_truth):
     """
@@ -282,7 +300,29 @@ def prepare_data(train_input_data, train_ground_truth, test_input_data, test_gro
     # Prepare evaluation data (combine validation and test data)
     X_eval, y_eval = prepare_sub_data(test_input_data, test_ground_truth)
     
+    return normalize_data(X_train, y_train, X_eval, y_eval)
+
+
+def normalize_data(X_train, y_train, X_eval, y_eval):
+    # Calculate std and mean, replacing 0 std with 1 to avoid division by zero
+    training_data_std, training_data_mean = torch.std_mean(X_train, dim=0)
+    training_data_std[training_data_std == 0] = 1.0  # Replace zero std with 1
+    training_data_std[torch.isnan(training_data_std)] = 1.0  # Replace NaN std with 1
+    training_data_mean[torch.isnan(training_data_mean)] = 0.0  # Replace NaN mean with 0
+
+    gt_std, gt_mean = torch.std_mean(y_train, dim=0)
+    gt_std[gt_std == 0] = 1.0  # Replace zero std with 1
+    gt_std[torch.isnan(gt_std)] = 1.0  # Replace NaN std with 1
+    gt_mean[torch.isnan(gt_mean)] = 0.0  # Replace NaN mean with 0
+
+    # Normalize the data
+    X_train = (X_train - training_data_mean) / training_data_std
+    X_eval = (X_eval - training_data_mean) / training_data_std
+    y_train = (y_train - gt_mean) / gt_std
+    y_eval = (y_eval - gt_mean) / gt_std
+
     return X_train, y_train, X_eval, y_eval
+
 
 def create_dataloaders(X_train, y_train, X_val, y_val, batch_size):
     train_dataset = TensorDataset(X_train, y_train)
@@ -302,7 +342,7 @@ def train_epoch(model, train_loader, optimizer, device, index):
         data, targets = data.to(device), targets.to(device)
         
         optimizer.zero_grad()
-        logits, loss = model(data, targets, (index**0.2)/(NUM_EPOCHS**0.2))
+        output, loss = model(data, targets, (index**0.1)/(NUM_EPOCHS**0.1))
         
         if loss is None:
             continue
@@ -322,30 +362,67 @@ def train_epoch(model, train_loader, optimizer, device, index):
     
     return total_loss / length
 
-def validate(model, val_loader, device):
+
+def get_target_loss(val_loader, output_data_indices=None):
+    total_target_loss = 0
+    total_length = 0
+
+    for data, targets in val_loader:
+        carry_over_data = []
+        for index in output_data_indices:
+            carry_over_data.append(data[:,0,index].unsqueeze(1))  # Add dimension to make it (batch_size, 1)
+
+        # Stack along dimension 1 to get (batch_size, len(output_data_indices))
+        carry_over_data = torch.cat(carry_over_data, dim=1)
+
+        length = len(data)
+        total_length += length
+        loss = F.l1_loss(carry_over_data, targets).item() * length
+        total_target_loss += loss
+
+    return total_target_loss / total_length
+
+
+def validate(model, val_loader, device, output_data_indices=None):
     model.eval()
     total_loss = 0
-    length = 0
+    total_length = 0
+    total_target_loss = 0
     
     with torch.no_grad():
         for data, targets in val_loader:
             data, targets = data.to(device), targets.to(device)
-            logits, loss = model(data, targets)
+            output, loss = model(data, targets)
             
             if loss is None:
                 continue
-                
-            total_loss += loss.item()
-            length += 1
+            length = len(data)
+            total_length += length
+            total_loss += loss.item() * length
     
-    return total_loss / length
+    return total_loss / total_length
 
-def main():
-        # Fields to predict
-    output_vector_fields = ['netincomeloss']
-    OUTPUT_SIZE = len(output_vector_fields)
+
+def get_output_gradients(model, val_loader, device):
+    model.eval()
+    all_gradients = []
+    
+    for data, targets in val_loader:
+        data = data.to(device)
+        data.requires_grad = True
+        
+        output, _ = model(data, targets.to(device))
+        gradient = torch.autograd.grad(outputs=output[:,0].sum(), inputs=data, allow_unused=True)
+        
+        all_gradients.append(data.grad[:,0,:].clone())  # Store gradients for this batch
+        
+    return torch.cat(all_gradients, dim=0)  # Concatenate all batches
+
+
+def train():
+    OUTPUT_SIZE = len(OUTPUT_VECTOR_FIELDS)
     # Load and prepare data
-    train_input_data, train_ground_truth, test_input_data, test_ground_truth, n_embd = load_data()
+    train_input_data, train_ground_truth, test_input_data, test_ground_truth, n_embd, output_data_indices = load_data(output_vector_fields=OUTPUT_VECTOR_FIELDS)
     X_train, y_train, X_val, y_val = prepare_data(train_input_data, train_ground_truth, test_input_data, test_ground_truth,)
     train_loader, val_loader = create_dataloaders(X_train, y_train, X_val, y_val, BATCH_SIZE)
     
@@ -366,6 +443,9 @@ def main():
     
     # Training loop
     best_val_loss = float('inf')
+
+    target_loss = get_target_loss(val_loader=val_loader, output_data_indices=output_data_indices)
+
     for epoch in range(NUM_EPOCHS):
         train_loss = train_epoch(model, train_loader, optimizer, DEVICE, epoch)
         val_loss = validate(model, val_loader, DEVICE)
@@ -375,8 +455,34 @@ def main():
             torch.save(model.state_dict(), 'test_model.pt')
         
         if epoch % 10 == 0:
-            print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+            print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Best VL: {best_val_loss:.4f}, Target: {target_loss:.4f}')
+
+def test():
+        # Fields to predict
+    OUTPUT_SIZE = len(OUTPUT_VECTOR_FIELDS)
+    # Load and prepare data
+    train_input_data, train_ground_truth, test_input_data, test_ground_truth, n_embd, output_data_indices = load_data()
+    X_train, y_train, X_val, y_val = prepare_data(train_input_data, train_ground_truth, test_input_data, test_ground_truth,)
+    train_loader, val_loader = create_dataloaders(X_train, y_train, X_val, y_val, BATCH_SIZE)
+    
+    # Initialize model
+    model = EloisNet(
+        n_embd=n_embd,
+        n_head=N_HEAD,
+        n_layer=N_LAYER,
+        output_size=OUTPUT_SIZE,
+        dropout_prob=MAX_DROPOUT_PROB,
+    ).to(DEVICE)
+
+    model.load_state_dict(torch.load('netincomeloss.pt'))
+    val_loss = validate(model, val_loader, DEVICE)
+    gradients = get_output_gradients(model, val_loader, DEVICE)
+    target_loss = get_target_loss(val_loader=val_loader, output_data_indices=output_data_indices)
+
+    print(f"Val Loss: {val_loss}, Target Loss: {target_loss}")
 
 if __name__ == '__main__':
-    main()
+
+    # test()
+    train()
 
