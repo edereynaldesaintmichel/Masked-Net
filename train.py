@@ -9,15 +9,15 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # Hyperparams
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 LEARNING_RATE = 4e-3
-NUM_EPOCHS = 500
+NUM_EPOCHS = 1000
 N_HEAD = 32
-N_LAYER = 1
+N_LAYER = 0
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 MAX_GRAD_NORM = 1e7
-MAX_DROPOUT_PROB = 0.1
-NUM_INPUT_FIELDS = 128
+MAX_DROPOUT_PROB = 0.3
+NUM_INPUT_FIELDS = 32
 
 
 # Fields to predict:
@@ -130,7 +130,7 @@ class FinancialDropout(nn.Module):
         random_mask = (torch.rand_like(values) > self.drop_prob * dropout_factor).float()
         
         # Generate random scaling factors between 0.5 and 2 for each sample in the batch
-        scale_factors = torch.randn(values.shape[0], 1, device=values.device)  # generates numbers between 0.5 and 2
+        scale_factors = torch.randn(values.shape[0], 1, device=values.device) * 0.5 + 1
         
         # Apply dropout and scaling to values, only dropout to masks
         new_values = values * random_mask * scale_factors
@@ -148,15 +148,15 @@ class EloisNet(nn.Module):
             *[Block(n_embd, n_head=n_head) for _ in range(n_layer)]
         )
         self.lm_head = nn.Sequential(
-            # nn.Linear(n_embd, 4*n_embd),
-            # nn.GELU(),
-            # nn.Linear(4*n_embd, n_embd),
-            # nn.GELU(),
-            # nn.Linear(n_embd, 4*n_embd),
-            # nn.GELU(),
-            # nn.Linear(4*n_embd, n_embd),
+            nn.Linear(n_embd, n_embd//2),
             nn.GELU(),
-            nn.Linear(n_embd, output_size)
+            nn.Linear(n_embd//2, n_embd//4),
+            nn.GELU(),
+            nn.Linear(n_embd//4, n_embd//8),
+            nn.GELU(),
+            nn.Linear(n_embd//8, n_embd//16),
+            nn.GELU(),
+            nn.Linear(n_embd//16, output_size)
         )
         self.apply(self._init_weights)
 
