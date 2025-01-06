@@ -9,23 +9,23 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # Hyperparams
-BATCH_SIZE = 32
-LEARNING_RATE = 4e-3
-NUM_EPOCHS = 1000
+BATCH_SIZE = 128
+LEARNING_RATE = 1e-3
+NUM_EPOCHS = 10
 N_HEAD = 32
 N_LAYER = 0
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 MAX_GRAD_NORM = 1e7
-MAX_DROPOUT_PROB = 0.3
+MAX_DROPOUT_PROB = 0.01
 NUM_INPUT_FIELDS = 32
 
 
 # Fields to predict:
-OUTPUT_VECTOR_FIELDS = ['netincomeloss']
+OUTPUT_VECTOR_FIELDS = ['netIncome']
 
 torch.manual_seed(42)
 
-training_data_std, training_data_mean, gt_std, gt_mean  = 1, 1, 1, 1
+std, mean = 1, 1
 
 
 class EloisHead(nn.Module):
@@ -141,199 +141,83 @@ class FinancialDropout(nn.Module):
         return torch.stack([new_values, new_masks], dim=1), new_targets
 
 class EloisNet(nn.Module):
-    def __init__(self, n_embd, n_head, n_layer, output_size, dropout_prob=0.5):
+    def __init__(self, input_size, output_size, number_of_currencies, dropout_prob=0.1):
         super().__init__()
-        self.financial_dropout = FinancialDropout(dropout_prob)
-        self.blocks = nn.Sequential(
-            *[Block(n_embd, n_head=n_head) for _ in range(n_layer)]
-        )
+        self.currency_embedding = nn.Embedding(num_embeddings=number_of_currencies, embedding_dim=2)
         self.lm_head = nn.Sequential(
-            nn.Linear(n_embd, n_embd//2),
-            nn.GELU(),
-            nn.Linear(n_embd//2, n_embd//4),
-            nn.GELU(),
-            nn.Linear(n_embd//4, n_embd//8),
-            nn.GELU(),
-            nn.Linear(n_embd//8, n_embd//16),
-            nn.GELU(),
-            nn.Linear(n_embd//16, output_size)
+            nn.Linear(input_size + 1, input_size//2),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob),
+            nn.Linear(input_size//2, input_size//4),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob),
+            nn.Linear(input_size//4, input_size//8),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob),
+            nn.Linear(input_size//8, input_size//16),
+            nn.ReLU(),
+            nn.Linear(input_size//16, output_size)
         )
-        self.apply(self._init_weights)
+    #     self.apply(self._init_weights)
 
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0, std=0.02)
+    # def _init_weights(self, module):
+    #     if isinstance(module, nn.Linear):
+    #         torch.nn.init.normal_(module.weight, mean=0, std=0.02)
 
     def forward(self, input, targets=None, dropout_factor=1):
-        input, targets = self.financial_dropout(input, targets, dropout_factor)  # Apply financial dropout during training
-        block_output = self.blocks(input)  # (B,2,n_emb)
-        output = self.lm_head(block_output[:,0,:])  # (B, output_size)
+        main_features = input[:, :-1]
+        currency_idx = input[:, -1].long()
+        currency_embedding = self.currency_embedding(currency_idx)  # Shape: (batch_size, 2)
+        combined_input = torch.cat([main_features, currency_embedding], dim=1)
+
+        output = self.lm_head(combined_input)  # (B, output_size)
 
         if targets is None:
             return output, None
             
-        loss = F.l1_loss(output, targets) #+ torch.norm((block_output[:,0,:] - input[:,0,:]) * input[:,1,:])
+        loss = F.l1_loss(output, targets)
         return output, loss
 
-def load_data(filepath='financial_statements.json', output_vector_fields=['netincomeloss']):
-    # Load financial statements
-    with open(filepath, 'r+') as file:
-        financial_statements = json.load(file)
 
-    # Count field occurrences
-    all_fields_counter = {}
-    # financial_statements = dict(islice(financial_statements.items(), 5))
-    for financial_statement in financial_statements.values():
-        for train_yearly_report in financial_statement:
-            for key, value in train_yearly_report.items():
-                if not isinstance(value, (int, float)):
-                    continue
-                all_fields_counter[key] = all_fields_counter.get(key, 0) + 1
 
-    # Get top 128 most common fields
-    sorted_all_fields_counter = dict(
-        sorted(all_fields_counter.items(), 
-              key=lambda item: item[1], 
-              reverse=True)[1:NUM_INPUT_FIELDS+1] #The 1 here is because the first field is an index.
-    )
 
-    output_data_indices = [list(sorted_all_fields_counter.keys()).index(output_field) + 2*len(sorted_all_fields_counter) for output_field in output_vector_fields]
 
-    test_input_data = []
-    test_ground_truth = []
-
-    
-    train_input_data = []
-    train_ground_truth = []
-    
-    for financial_statement in financial_statements.values():
-        financial_statement.reverse()
-        if len(financial_statement) < 5:
+def get_val_dataloader(full_dataset, output_field_indices, batch_size):
+    input_data = []
+    ground_truth = []
+    for company_statements in full_dataset:
+        if (company_statements.shape[0] < 4):
             continue
-            
-        train_input_vector = []
-        train_masking_vector = []
-
-        train_output_vector = []
-
-        test_input_vector = []
-        test_masking_vector = []
-
-        test_output_vector = []
-        
-        # Get input data from first 3 years
-        for index, train_yearly_report in enumerate(financial_statement):
-            if (index > 3):
-                break
-            for key in sorted_all_fields_counter:
-                value = train_yearly_report.get(key, 0)
-                try:
-                    value = float(value)
-                except:
-                    value = 0
-                masking_value = 0 if key in train_yearly_report else 1
-                if index > 0:
-                    test_input_vector.append(value)
-                    test_masking_vector.append(masking_value)
-                if index < 3:
-                    train_input_vector.append(value)
-                    train_masking_vector.append(masking_value)
-        
-
-        train_yearly_report = financial_statement[3]
-        test_yearly_report = financial_statement[4]
-
-        for key in output_vector_fields:
-            train_value = train_yearly_report.get(key, None)
-            test_value = test_yearly_report.get(key, None)
-            if train_value is not None:
-                train_value /= 1e0
-            if test_value is not None:
-                test_value /= 1e0
-            train_output_vector.append(train_value)
-            test_output_vector.append(test_value)
-        
-        train_input_data.append((train_input_vector, train_masking_vector))
-        train_ground_truth.append(train_output_vector)
-
-        test_input_data.append((test_input_vector, test_masking_vector))
-        test_ground_truth.append(test_output_vector)
-
-    return train_input_data, train_ground_truth, test_input_data, test_ground_truth, len(train_input_data[0][0]), output_data_indices
-
-
-
-
-def prepare_sub_data(input_data, ground_truth):
-    """
-    Helper function to filter out samples with None values in ground truth
-    and convert the data to tensors.
-    """
-    # Filter out any samples with None values in ground truth
-    valid_samples = []
-    valid_targets = []
+        input_data.append(torch.flatten(company_statements[-4:-1]))
+        sub_ground_truth = torch.index_select(company_statements[-1], dim=-1, index=output_field_indices)
+        ground_truth.append(sub_ground_truth)
     
-    for idx, (sample, target) in enumerate(zip(input_data, ground_truth)):
-        if None in target:
+    ground_truth = torch.stack(ground_truth)  # Changed from torch.tensor to torch.stack
+    input_data = torch.stack(input_data)      # Changed from torch.tensor to torch.stack
+    val_dataset = TensorDataset(input_data, ground_truth)
+
+    return DataLoader(val_dataset, batch_size=batch_size)
+    
+
+def get_train_dataloader(full_dataset, output_field_indices, batch_size):
+    input_data = []
+    ground_truth = []    
+    for company_statements in full_dataset:
+        if (company_statements.shape[0] < 4):
             continue
-        valid_samples.append(sample)
-        valid_targets.append(target)
+        for i in range(company_statements.shape[0] - 5):
+            input_data.append(torch.flatten(company_statements[i:i+3]))
+            sub_ground_truth = torch.index_select(company_statements[i+4], dim=-1, index=output_field_indices)
+            ground_truth.append(sub_ground_truth)
     
-    # Convert to tensors
-    values = torch.FloatTensor([x[0] for x in valid_samples])
-    mask = torch.FloatTensor([x[1] for x in valid_samples])
-    targets = torch.FloatTensor(valid_targets)
-    
-    # Create proper input format (B, 2, n_embd)
-    data = torch.stack([values, mask], dim=1)
-    
-    return data, targets
+    ground_truth = torch.stack(ground_truth)  # Changed from torch.tensor to torch.stack
+    input_data = torch.stack(input_data)      # Changed from torch.tensor to torch.stack
+    train_dataset = TensorDataset(input_data, ground_truth)
 
-def prepare_data(train_input_data, train_ground_truth, test_input_data, test_ground_truth):
-    """
-    Main function to prepare training and evaluation data.
-    Evaluation data combines both validation and test data.
-    """
-    # Prepare training data
-    X_train, y_train = prepare_sub_data(train_input_data, train_ground_truth)
-    
-    # Prepare evaluation data (combine validation and test data)
-    X_eval, y_eval = prepare_sub_data(test_input_data, test_ground_truth)
-    
-    return normalize_data(X_train, y_train, X_eval, y_eval)
+    return DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 
-def normalize_data(X_train, y_train, X_eval, y_eval):
-    # Calculate std and mean, replacing 0 std with 1 to avoid division by zero
-    training_data_std, training_data_mean = torch.std_mean(X_train, dim=0)
-    training_data_std[training_data_std == 0] = 1.0  # Replace zero std with 1
-    training_data_std[torch.isnan(training_data_std)] = 1.0  # Replace NaN std with 1
-    training_data_mean[torch.isnan(training_data_mean)] = 0.0  # Replace NaN mean with 0
-
-    gt_std, gt_mean = torch.std_mean(y_train, dim=0)
-    gt_std[gt_std == 0] = 1.0  # Replace zero std with 1
-    gt_std[torch.isnan(gt_std)] = 1.0  # Replace NaN std with 1
-    gt_mean[torch.isnan(gt_mean)] = 0.0  # Replace NaN mean with 0
-
-    # Normalize the data
-    X_train = (X_train - training_data_mean) / training_data_std
-    X_eval = (X_eval - training_data_mean) / training_data_std
-    y_train = (y_train - gt_mean) / gt_std
-    y_eval = (y_eval - gt_mean) / gt_std
-
-    return X_train, y_train, X_eval, y_eval
-
-
-def create_dataloaders(X_train, y_train, X_val, y_val, batch_size):
-    train_dataset = TensorDataset(X_train, y_train)
-    val_dataset = TensorDataset(X_val, y_val)
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    
-    return train_loader, val_loader
-
-def train_epoch(model, train_loader, optimizer, device, index):
+def train_epoch(model, train_loader, optimizer, device):
     model.train()
     total_loss = 0
     length = 0
@@ -342,23 +226,19 @@ def train_epoch(model, train_loader, optimizer, device, index):
         data, targets = data.to(device), targets.to(device)
         
         optimizer.zero_grad()
-        output, loss = model(data, targets, (index**0.1)/(NUM_EPOCHS**0.1))
+        output, loss = model(data, targets)
         
         if loss is None:
             continue
             
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
         optimizer.step()
         
         total_loss += loss.item()
         length += 1
-        # Add gradient monitoring
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         grad_norm = param.grad.norm()
-        #         if grad_norm > 10:
-        #             print(f"Large gradient in {name}: {grad_norm}")
+        
+        if batch_idx%1000 == 0:
+            print(f'Training loss: {loss}')
     
     return total_loss / length
 
@@ -368,17 +248,12 @@ def get_target_loss(val_loader, output_data_indices=None):
     total_length = 0
 
     for data, targets in val_loader:
-        carry_over_data = []
-        for index in output_data_indices:
-            carry_over_data.append(data[:,0,index].unsqueeze(1))  # Add dimension to make it (batch_size, 1)
+        carry_over_data = torch.index_select(data, dim=-1, index=output_data_indices)
 
-        # Stack along dimension 1 to get (batch_size, len(output_data_indices))
-        carry_over_data = torch.cat(carry_over_data, dim=1)
-
-        length = len(data)
-        total_length += length
+        length = data.shape[0]
         loss = F.l1_loss(carry_over_data, targets).item() * length
         total_target_loss += loss
+        total_length += length
 
     return total_target_loss / total_length
 
@@ -422,16 +297,17 @@ def get_output_gradients(model, val_loader, device):
 def train():
     OUTPUT_SIZE = len(OUTPUT_VECTOR_FIELDS)
     # Load and prepare data
-    train_input_data, train_ground_truth, test_input_data, test_ground_truth, n_embd, output_data_indices = load_data(output_vector_fields=OUTPUT_VECTOR_FIELDS)
-    X_train, y_train, X_val, y_val = prepare_data(train_input_data, train_ground_truth, test_input_data, test_ground_truth,)
-    train_loader, val_loader = create_dataloaders(X_train, y_train, X_val, y_val, BATCH_SIZE)
+    fields = ["revenue", "costOfRevenue", "grossProfit", "grossProfitRatio", "researchAndDevelopmentExpenses", "generalAndAdministrativeExpenses", "sellingAndMarketingExpenses", "sellingGeneralAndAdministrativeExpenses", "otherExpenses", "operatingExpenses", "costAndExpenses", "interestIncome", "interestExpense", "depreciationAndAmortization", "ebitda", "ebitdaratio", "operatingIncome", "operatingIncomeRatio", "totalOtherIncomeExpensesNet", "incomeBeforeTax", "incomeBeforeTaxRatio", "incomeTaxExpense", "netIncome", "netIncomeRatio", "eps", "epsdiluted", "weightedAverageShsOut", "weightedAverageShsOutDil", "cashAndCashEquivalents", "shortTermInvestments", "cashAndShortTermInvestments", "netReceivables", "inventory", "otherCurrentAssets", "totalCurrentAssets", "propertyPlantEquipmentNet", "goodwill", "intangibleAssets", "goodwillAndIntangibleAssets", "longTermInvestments", "taxAssets", "otherNonCurrentAssets", "totalNonCurrentAssets", "otherAssets", "totalAssets", "accountPayables", "shortTermDebt", "taxPayables", "deferredRevenue", "otherCurrentLiabilities", "totalCurrentLiabilities", "longTermDebt", "deferredRevenueNonCurrent", "deferredTaxLiabilitiesNonCurrent", "otherNonCurrentLiabilities", "totalNonCurrentLiabilities", "otherLiabilities", "capitalLeaseObligations", "totalLiabilities", "preferredStock", "commonStock", "retainedEarnings", "accumulatedOtherComprehensiveIncomeLoss", "othertotalStockholdersEquity", "totalStockholdersEquity", "totalEquity", "totalLiabilitiesAndStockholdersEquity", "minorityInterest", "totalLiabilitiesAndTotalEquity", "totalInvestments", "totalDebt", "netDebt", "calendarYear", "reportedCurrency"]
+    output_field_indices = torch.tensor([fields.index(field) for field in OUTPUT_VECTOR_FIELDS])
+    full_dataset = torch.load('full_data.pt')
+    val_data_loader = get_val_dataloader(full_dataset=full_dataset, output_field_indices=output_field_indices, batch_size=BATCH_SIZE)
+    train_data_loader = get_train_dataloader(full_dataset=full_dataset, output_field_indices=output_field_indices, batch_size=BATCH_SIZE)
     
     # Initialize model
     model = EloisNet(
-        n_embd=n_embd,
-        n_head=N_HEAD,
-        n_layer=N_LAYER,
+        input_size=222,
         output_size=OUTPUT_SIZE,
+        number_of_currencies=46,
         dropout_prob=MAX_DROPOUT_PROB,
     ).to(DEVICE)
 
@@ -444,30 +320,29 @@ def train():
     # Training loop
     best_val_loss = float('inf')
 
-    target_loss = get_target_loss(val_loader=val_loader, output_data_indices=output_data_indices)
+    target_loss = get_target_loss(val_loader=val_data_loader, output_data_indices=output_field_indices+148)
 
     for epoch in range(NUM_EPOCHS):
-        train_loss = train_epoch(model, train_loader, optimizer, DEVICE, epoch)
-        val_loss = validate(model, val_loader, DEVICE)
+        train_loss = train_epoch(model, train_data_loader, optimizer, DEVICE)
+        val_loss = validate(model, val_data_loader, DEVICE)
         
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), 'test_model.pt')
-        
-        if epoch % 10 == 0:
-            print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Best VL: {best_val_loss:.4f}, Target: {target_loss:.4f}')
+    
+        print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Best VL: {best_val_loss:.4f}, Target: {target_loss:.4f}')
 
 def test():
         # Fields to predict
     OUTPUT_SIZE = len(OUTPUT_VECTOR_FIELDS)
-    # Load and prepare data
-    train_input_data, train_ground_truth, test_input_data, test_ground_truth, n_embd, output_data_indices = load_data()
-    X_train, y_train, X_val, y_val = prepare_data(train_input_data, train_ground_truth, test_input_data, test_ground_truth,)
-    train_loader, val_loader = create_dataloaders(X_train, y_train, X_val, y_val, BATCH_SIZE)
+
+    full_dataset = torch.load('full_data.pt')
+
+    val_data_loader = get_val_dataloader(full_dataset)
     
     # Initialize model
     model = EloisNet(
-        n_embd=n_embd,
+        input_size=n_embd,
         n_head=N_HEAD,
         n_layer=N_LAYER,
         output_size=OUTPUT_SIZE,
