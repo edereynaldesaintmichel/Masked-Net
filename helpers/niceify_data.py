@@ -69,6 +69,13 @@ def niceify_data():
         reports = (reports - mean) / std
         normalized_data.append(reports)
 
+
+    torch.save(std, 'std.pt')
+    torch.save(mean, 'mean.pt')
+    torch.save(normalized_data, 'full_data.pt')
+    torch.save(currency_indices, 'currency_indices.pt')
+    torch.save(currency_exchange_rates, 'currency_exchange_rates.pt')
+
     return normalized_data
 
 
