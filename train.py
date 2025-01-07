@@ -158,6 +158,7 @@ class EloisNet(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size//16, output_size)
         )
+
     #     self.apply(self._init_weights)
 
     # def _init_weights(self, module):

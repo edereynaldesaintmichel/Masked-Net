@@ -3,7 +3,7 @@ import torch
 
 def niceify_data():
     financial_statements = {}
-    for i in range(1):
+    for i in range(26):
         with open(f'data/full_reports_{i}.json', 'r+') as file:
             to_add = json.load(file)
             financial_statements = {**financial_statements, **to_add}
@@ -18,7 +18,7 @@ def niceify_data():
     currency_exchange_rates = {"USD": 1.0, "EUR": 0.93, "CAD": 1.37, "CNY": 7.24, "IDR": 15865.0, "AUD": 1.52, "ILS": 3.74, "GBP": 0.8, "DKK": 6.97, "BRL": 4.95, "NOK": 10.85, "PHP": 57.68, "SEK": 10.57, "TWD": 32.45, "CHF": 0.91, "TRY": 32.24, "NZD": 1.65, "SGD": 1.35, "JPY": 151.64, "HKD": 7.82, "NGN": 1487.96, "ZAR": 18.96, "PEN": 3.72, "MYR": 4.77, "THB": 36.26, "CLP": 971.46, "PLN": 4.02, "MXN": 17.06, "NIS": 3.74, "SAR": 3.75, "PGK": 3.8, "COP": 3918.96, "INR": 83.5, "ARS": 879.65, "GEL": 2.68, "GHS": 13.89, "CZK": 23.47, "EGP": 47.6, "RON": 4.64, "HUF": 366.1, "RUB": 91.62, "KRW": 1334.42, "KZT": 450.82, "NAD": 18.96, "VND": 24535.0}
     all_financial_statements = []
     ratio_fields = ['grossProfitRatio', 'ebitdaratio', 'operatingIncomeRatio', 'incomeBeforeTaxRatio', 'netIncomeRatio']
-    to_not_scale_with_exchange_rate = set(['calendarYear'] + ratio_fields)
+    to_not_scale_with_exchange_rate = set(['calendarYear', 'reportedCurrency'] + ratio_fields)
     invalid_counter = 0
     for company_statements in financial_statements.values():
         list_statements = []
@@ -39,6 +39,8 @@ def niceify_data():
                     value = 0.0
                 if field not in to_not_scale_with_exchange_rate:
                     value = value / currency_exchange_rates[currency]
+                else:
+                    x = 2
                 if abs(value) > 1e12 or (field in ratio_fields and value > 1):
                     is_valid = False
                     invalid_counter += 1
@@ -56,7 +58,9 @@ def niceify_data():
 
     all_financial_statements = torch.tensor(all_financial_statements)
     all_financial_statements = torch.nan_to_num(all_financial_statements, nan=0.0, posinf=0.0, neginf=0.0)
-    std, mean = torch.std_mean(all_financial_statements, dim=0)
+    std, mean = torch.std_mean(all_financial_statements[:,:-1], dim=0)
+    std = torch.cat((std, torch.tensor(1).unsqueeze(0)), -1)
+    mean = torch.cat((mean, torch.tensor(0).unsqueeze(0)), -1)
 
     normalized_data = []
     for reports in data:
