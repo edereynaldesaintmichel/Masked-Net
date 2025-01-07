@@ -1,6 +1,83 @@
 import json
 import torch
 
+FIELDS_AND_LIMITS = {
+    "revenue": 1e12, # Apple's revenue is ~400B
+    "costOfRevenue": 8e11,
+    "grossProfit": 4e11,
+    "grossProfitRatio": 1.0, # As a ratio, should be between 0 and 1
+    "researchAndDevelopmentExpenses": 5e10,
+    "generalAndAdministrativeExpenses": 5e10,
+    "sellingAndMarketingExpenses": 5e10,
+    "sellingGeneralAndAdministrativeExpenses": 1e11,
+    "otherExpenses": 5e10,
+    "operatingExpenses": 2e11,
+    "costAndExpenses": 9e11,
+    "interestIncome": 5e10,
+    "interestExpense": 5e10,
+    "depreciationAndAmortization": 5e10,
+    "ebitda": 4e11,
+    "ebitdaratio": 1.0,
+    "operatingIncome": 3e11,
+    "operatingIncomeRatio": 1.0,
+    "totalOtherIncomeExpensesNet": 5e10,
+    "incomeBeforeTax": 3e11,
+    "incomeBeforeTaxRatio": 1.0,
+    "incomeTaxExpense": 1e11,
+    "netIncome": 2e11,
+    "netIncomeRatio": 1.0,
+    "eps": 1000, # Very generous
+    "epsdiluted": 1000,
+    "weightedAverageShsOut": 2e10, # Apple has about 16B
+    "weightedAverageShsOutDil": 2e10,
+    "cashAndCashEquivalents": 3e11,
+    "shortTermInvestments": 3e11,
+    "cashAndShortTermInvestments": 4e11,
+    "netReceivables": 2e11,
+    "inventory": 2e11,
+    "otherCurrentAssets": 2e11,
+    "totalCurrentAssets": 5e11,
+    "propertyPlantEquipmentNet": 5e11,
+    "goodwill": 4e11,
+    "intangibleAssets": 4e11,
+    "goodwillAndIntangibleAssets": 5e11,
+    "longTermInvestments": 5e11,
+    "taxAssets": 1e11,
+    "otherNonCurrentAssets": 3e11,
+    "totalNonCurrentAssets": 2e12,
+    "otherAssets": 3e11,
+    "totalAssets": 3e12,
+    "accountPayables": 2e11,
+    "shortTermDebt": 3e11,
+    "taxPayables": 1e11,
+    "deferredRevenue": 1e11,
+    "otherCurrentLiabilities": 2e11,
+    "totalCurrentLiabilities": 5e11,
+    "longTermDebt": 5e11,
+    "deferredRevenueNonCurrent": 1e11,
+    "deferredTaxLiabilitiesNonCurrent": 1e11,
+    "otherNonCurrentLiabilities": 2e11,
+    "totalNonCurrentLiabilities": 1e12,
+    "otherLiabilities": 2e11,
+    "capitalLeaseObligations": 2e11,
+    "totalLiabilities": 2e12,
+    "preferredStock": 1e11,
+    "commonStock": 1e11,
+    "retainedEarnings": 5e11,
+    "accumulatedOtherComprehensiveIncomeLoss": 1e11,
+    "othertotalStockholdersEquity": 2e11,
+    "totalStockholdersEquity": 1e12,
+    "totalEquity": 1e12,
+    "totalLiabilitiesAndStockholdersEquity": 3e12,
+    "minorityInterest": 2e11,
+    "totalLiabilitiesAndTotalEquity": 3e12,
+    "totalInvestments": 1e12,
+    "totalDebt": 1e12,
+    "netDebt": 1e12,
+    "calendarYear": None,
+    "reportedCurrency": None # This should be a string
+}
+
 def niceify_data():
     financial_statements = {}
     for i in range(26):
@@ -11,7 +88,7 @@ def niceify_data():
     # Count field occurrences
     all_fields_counter = {}
     # financial_statements = dict(islice(financial_statements.items(), 5))
-    fields = [key for key, value in next(iter(financial_statements.values()))[0].items() if isinstance(value, (int, float))] + ["calendarYear", "reportedCurrency"]
+    # fields = [key for key, value in next(iter(financial_statements.values()))[0].items() if isinstance(value, (int, float))] + ["calendarYear", "reportedCurrency"]
 
     data = []
     currency_indices = {"USD": 0, "EUR": 1, "CAD": 2, "CNY": 3, "IDR": 4, "AUD": 5, "ILS": 6, "GBP": 7, "DKK": 8, "BRL": 9, "NOK": 10, "PHP": 11, "SEK": 12, "TWD": 13, "CHF": 14, "TRY": 15, "NZD": 16, "SGD": 17, "JPY": 18, "HKD": 19, "NGN": 20, "ZAR": 21, "PEN": 22, "MYR": 23, "THB": 24, "CLP": 26, "PLN": 27, "MXN": 28, "NIS": 29, "SAR": 30, "PGK": 31, "COP": 32, "INR": 33, "ARS": 34, "GEL": 35, "GHS": 36, "CZK": 37, "EGP": 38, "RON": 39, "HUF": 40, "RUB": 41, "KRW": 42, "KZT": 43, "NAD": 44, "VND": 45}
@@ -20,7 +97,9 @@ def niceify_data():
     ratio_fields = ['grossProfitRatio', 'ebitdaratio', 'operatingIncomeRatio', 'incomeBeforeTaxRatio', 'netIncomeRatio']
     to_not_scale_with_exchange_rate = set(['calendarYear', 'reportedCurrency'] + ratio_fields)
     invalid_counter = 0
+    general_counter = 0
     for company_statements in financial_statements.values():
+        general_counter += 1
         list_statements = []
         is_valid = True
         for statement in company_statements:
@@ -31,7 +110,7 @@ def niceify_data():
                 continue
             statement['reportedCurrency'] = currency_indices[currency]
             vector = []
-            for field in fields:
+            for field, limit in FIELDS_AND_LIMITS.items():
                 value = statement[field]
                 try:
                     value = float(value)
@@ -39,9 +118,8 @@ def niceify_data():
                     value = 0.0
                 if field not in to_not_scale_with_exchange_rate:
                     value = value / currency_exchange_rates[currency]
-                else:
-                    x = 2
-                if abs(value) > 1e12 or (field in ratio_fields and value > 1):
+                
+                if limit is not None and abs(value) > limit:
                     is_valid = False
                     invalid_counter += 1
                     break
@@ -69,7 +147,7 @@ def niceify_data():
         reports = (reports - mean) / std
         normalized_data.append(reports)
 
-
+    print(f'Share of invalid data: {invalid_counter/general_counter}')
     torch.save(std, 'std.pt')
     torch.save(mean, 'mean.pt')
     torch.save(normalized_data, 'full_data.pt')

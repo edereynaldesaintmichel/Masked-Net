@@ -21,7 +21,9 @@ NUM_INPUT_FIELDS = 32
 
 
 # Fields to predict:
-OUTPUT_VECTOR_FIELDS = ["interestIncome", "interestExpense", "ebitda", "operatingIncome", "incomeBeforeTax", "netIncome", "eps", "epsdiluted",]
+OUTPUT_VECTOR_FIELDS = ["interestIncome", "interestExpense", "ebitda", "operatingIncome", "incomeBeforeTax", "netIncome", "eps", "epsdiluted",] # These output fields are for net_income_and_stuff_model.pt
+# OUTPUT_VECTOR_FIELDS = ["revenue", "operatingIncome"] # These output fields are for revenue.pt
+
 
 torch.manual_seed(42)
 
@@ -308,7 +310,7 @@ def get_output_gradients(model, val_loader, device, output_field:str, input_fiel
 
     all_gradients = torch.stack(all_gradients, dim=0)
     all_gradients_sum = all_gradients.sum(dim=0)
-    all_gradients_sum /= all_gradients_sum.max()
+    # all_gradients_sum /= all_gradients_sum.max()
     full_gradients_dict = {key: (float(all_gradients_sum[value]), float(all_gradients_sum[value+74]), float(all_gradients_sum[value+148])) for key, value in input_dict.items()}
 
     return full_gradients_dict
@@ -370,7 +372,7 @@ def test():
     ).to(DEVICE)
 
 
-    model.load_state_dict(torch.load('test_model.pt', map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load('net_income_and_stuff_model.pt', map_location=torch.device('cpu')))
     std = torch.load('std.pt')
     mean = torch.load('mean.pt')
     currency_indices = torch.load('currency_indices.pt')
@@ -378,12 +380,12 @@ def test():
 
 
 
-    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='ebitda', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
+    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='epsdiluted', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
 
     return gradients
 
 if __name__ == '__main__':
 
-    test()
-    # train()
+    # test()
+    train()
 
