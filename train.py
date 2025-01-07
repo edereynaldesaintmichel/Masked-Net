@@ -10,19 +10,19 @@ from torch.nn import functional as F
 
 # Hyperparams
 BATCH_SIZE = 128
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 2e-3
 NUM_EPOCHS = 50
 N_HEAD = 32
 N_LAYER = 0
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 MAX_GRAD_NORM = 1e7
-MAX_DROPOUT_PROB = 0.01
+MAX_DROPOUT_PROB = 0.0
 NUM_INPUT_FIELDS = 32
 
 
 # Fields to predict:
 OUTPUT_VECTOR_FIELDS = ["interestIncome", "interestExpense", "ebitda", "operatingIncome", "incomeBeforeTax", "netIncome", "eps", "epsdiluted",] # These output fields are for net_income_and_stuff_model.pt
-# OUTPUT_VECTOR_FIELDS = ["revenue", "operatingIncome"] # These output fields are for revenue.pt
+# OUTPUT_VECTOR_FIELDS = ["revenue", "operatingIncome"] # These output fields are for revenue_model.pt
 
 
 torch.manual_seed(42)
@@ -161,7 +161,6 @@ class EloisNet(nn.Module):
             nn.Dropout(dropout_prob),
             nn.Linear(input_size//4, input_size//4),
             nn.ReLU(),
-            nn.Dropout(dropout_prob),
             nn.Dropout(dropout_prob),
             nn.Linear(input_size//4, input_size//4),
             nn.ReLU(),
@@ -310,7 +309,7 @@ def get_output_gradients(model, val_loader, device, output_field:str, input_fiel
 
     all_gradients = torch.stack(all_gradients, dim=0)
     all_gradients_sum = all_gradients.sum(dim=0)
-    # all_gradients_sum /= all_gradients_sum.max()
+    all_gradients_sum /= all_gradients_sum.max()
     full_gradients_dict = {key: (float(all_gradients_sum[value]), float(all_gradients_sum[value+74]), float(all_gradients_sum[value+148])) for key, value in input_dict.items()}
 
     return full_gradients_dict
@@ -380,12 +379,12 @@ def test():
 
 
 
-    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='epsdiluted', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
+    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='netIncome', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
 
     return gradients
 
 if __name__ == '__main__':
 
-    # test()
-    train()
+    test()
+    # train()
 
