@@ -78,9 +78,12 @@ FIELDS_AND_LIMITS = {
     "reportedCurrency": None  # This should be a string
 }
 
+def nanstd(x): 
+    return torch.sqrt(torch.mean(torch.pow(x-torch.nanmean(x,dim=1).unsqueeze(-1),2)))
+
 def niceify_data():
     financial_statements = {}
-    for i in range(26):
+    for i in range(1):
         with open(f'data/full_reports_{i}.json', 'r+') as file:
             to_add = json.load(file)
             financial_statements = {**financial_statements, **to_add}
@@ -120,9 +123,10 @@ def niceify_data():
                     value = value / currency_exchange_rates[currency]
                 
                 if limit is not None and (value < limit[0] or value > limit[1]):
-                    is_valid = False
+                    # is_valid = False
                     invalid_counter += 1
-                    break
+                    value = 0
+                    # break
 
                 vector.append(value)
             if not is_valid:
@@ -136,7 +140,10 @@ def niceify_data():
 
     all_financial_statements = torch.tensor(all_financial_statements)
     all_financial_statements = torch.nan_to_num(all_financial_statements, nan=0.0, posinf=0.0, neginf=0.0)
-    std, mean = torch.std_mean(all_financial_statements[:,:-1], dim=0)
+    mask = all_financial_statements[:,:-1] != 0
+    all_financial_statements[:,:-1][~mask] = float('nan')
+    mean = torch.nanmean(all_financial_statements[:,:-1], dim=0)
+    std = 1
     std = torch.cat((std, torch.tensor(1).unsqueeze(0)), -1)
     mean = torch.cat((mean, torch.tensor(0).unsqueeze(0)), -1)
 
@@ -144,6 +151,7 @@ def niceify_data():
     for reports in data:
         if reports.shape[0] == 0:
             continue
+        mask = reports != 0
         reports = (reports - mean) / std
         normalized_data.append(reports)
 
