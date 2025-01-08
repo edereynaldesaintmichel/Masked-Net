@@ -2,80 +2,80 @@ import json
 import torch
 
 FIELDS_AND_LIMITS = {
-    "revenue": 1e12, # Apple's revenue is ~400B
-    "costOfRevenue": 8e11,
-    "grossProfit": 4e11,
-    "grossProfitRatio": 1.0, # As a ratio, should be between 0 and 1
-    "researchAndDevelopmentExpenses": 5e10,
-    "generalAndAdministrativeExpenses": 5e10,
-    "sellingAndMarketingExpenses": 5e10,
-    "sellingGeneralAndAdministrativeExpenses": 1e11,
-    "otherExpenses": 5e10,
-    "operatingExpenses": 2e11,
-    "costAndExpenses": 9e11,
-    "interestIncome": 5e10,
-    "interestExpense": 5e10,
-    "depreciationAndAmortization": 5e10,
-    "ebitda": 4e11,
-    "ebitdaratio": 1.0,
-    "operatingIncome": 3e11,
-    "operatingIncomeRatio": 1.0,
-    "totalOtherIncomeExpensesNet": 5e10,
-    "incomeBeforeTax": 3e11,
-    "incomeBeforeTaxRatio": 1.0,
-    "incomeTaxExpense": 1e11,
-    "netIncome": 2e11,
-    "netIncomeRatio": 1.0,
-    "eps": 1000, # Very generous
-    "epsdiluted": 1000,
-    "weightedAverageShsOut": 2e10, # Apple has about 16B
-    "weightedAverageShsOutDil": 2e10,
-    "cashAndCashEquivalents": 3e11,
-    "shortTermInvestments": 3e11,
-    "cashAndShortTermInvestments": 4e11,
-    "netReceivables": 2e11,
-    "inventory": 2e11,
-    "otherCurrentAssets": 2e11,
-    "totalCurrentAssets": 5e11,
-    "propertyPlantEquipmentNet": 5e11,
-    "goodwill": 4e11,
-    "intangibleAssets": 4e11,
-    "goodwillAndIntangibleAssets": 5e11,
-    "longTermInvestments": 5e11,
-    "taxAssets": 1e11,
-    "otherNonCurrentAssets": 3e11,
-    "totalNonCurrentAssets": 2e12,
-    "otherAssets": 3e11,
-    "totalAssets": 3e12,
-    "accountPayables": 2e11,
-    "shortTermDebt": 3e11,
-    "taxPayables": 1e11,
-    "deferredRevenue": 1e11,
-    "otherCurrentLiabilities": 2e11,
-    "totalCurrentLiabilities": 5e11,
-    "longTermDebt": 5e11,
-    "deferredRevenueNonCurrent": 1e11,
-    "deferredTaxLiabilitiesNonCurrent": 1e11,
-    "otherNonCurrentLiabilities": 2e11,
-    "totalNonCurrentLiabilities": 1e12,
-    "otherLiabilities": 2e11,
-    "capitalLeaseObligations": 2e11,
-    "totalLiabilities": 2e12,
-    "preferredStock": 1e11,
-    "commonStock": 1e11,
-    "retainedEarnings": 5e11,
-    "accumulatedOtherComprehensiveIncomeLoss": 1e11,
-    "othertotalStockholdersEquity": 2e11,
-    "totalStockholdersEquity": 1e12,
-    "totalEquity": 1e12,
-    "totalLiabilitiesAndStockholdersEquity": 3e12,
-    "minorityInterest": 2e11,
-    "totalLiabilitiesAndTotalEquity": 3e12,
-    "totalInvestments": 1e12,
-    "totalDebt": 1e12,
-    "netDebt": 1e12,
+    "revenue": (0, 1e12),  # Revenue can't be negative
+    "costOfRevenue": (0, 8e11),  # Costs are typically positive
+    "grossProfit": (-4e11, 4e11),  # Can be negative in extreme cases
+    "grossProfitRatio": (-5.0, 1.0),  # Updated: can be well below -1
+    "researchAndDevelopmentExpenses": (0, 5e10),  # Expenses are typically positive
+    "generalAndAdministrativeExpenses": (0, 5e10),
+    "sellingAndMarketingExpenses": (0, 5e10),
+    "sellingGeneralAndAdministrativeExpenses": (0, 1e11),
+    "otherExpenses": (-5e10, 5e10),  # Can be negative (if it's actually income)
+    "operatingExpenses": (0, 2e11),
+    "costAndExpenses": (0, 9e11),
+    "interestIncome": (0, 5e10),
+    "interestExpense": (0, 5e10),
+    "depreciationAndAmortization": (0, 5e10),
+    "ebitda": (-4e11, 4e11),
+    "ebitdaratio": (-5.0, 1.0),  # Updated: can be well below -1
+    "operatingIncome": (-3e11, 3e11),
+    "operatingIncomeRatio": (-5.0, 1.0),  # Updated: can be well below -1
+    "totalOtherIncomeExpensesNet": (-5e10, 5e10),
+    "incomeBeforeTax": (-3e11, 3e11),
+    "incomeBeforeTaxRatio": (-5.0, 1.0),  # Updated: can be well below -1
+    "incomeTaxExpense": (-1e11, 1e11),  # Can be negative (tax benefit)
+    "netIncome": (-2e11, 2e11),
+    "netIncomeRatio": (-5.0, 1.0),  # Updated: can be well below -1
+    "eps": (-1000, 1000),
+    "epsdiluted": (-1000, 1000),
+    "weightedAverageShsOut": (0, 2e10),  # Shares can't be negative
+    "weightedAverageShsOutDil": (0, 2e10),
+    "cashAndCashEquivalents": (0, 3e11),
+    "shortTermInvestments": (-3e11, 3e11),
+    "cashAndShortTermInvestments": (-4e11, 4e11),
+    "netReceivables": (-2e11, 2e11),
+    "inventory": (0, 2e11),
+    "otherCurrentAssets": (-2e11, 2e11),
+    "totalCurrentAssets": (0, 5e11),
+    "propertyPlantEquipmentNet": (0, 5e11),
+    "goodwill": (0, 4e11),
+    "intangibleAssets": (0, 4e11),
+    "goodwillAndIntangibleAssets": (0, 5e11),
+    "longTermInvestments": (-5e11, 5e11),
+    "taxAssets": (0, 1e11),
+    "otherNonCurrentAssets": (-3e11, 3e11),
+    "totalNonCurrentAssets": (0, 2e12),
+    "otherAssets": (-3e11, 3e11),
+    "totalAssets": (0, 3e12),
+    "accountPayables": (0, 2e11),
+    "shortTermDebt": (0, 3e11),
+    "taxPayables": (0, 1e11),
+    "deferredRevenue": (0, 1e11),
+    "otherCurrentLiabilities": (0, 2e11),
+    "totalCurrentLiabilities": (0, 5e11),
+    "longTermDebt": (0, 5e11),
+    "deferredRevenueNonCurrent": (0, 1e11),
+    "deferredTaxLiabilitiesNonCurrent": (0, 1e11),
+    "otherNonCurrentLiabilities": (0, 2e11),
+    "totalNonCurrentLiabilities": (0, 1e12),
+    "otherLiabilities": (0, 2e11),
+    "capitalLeaseObligations": (0, 2e11),
+    "totalLiabilities": (0, 2e12),
+    "preferredStock": (0, 1e11),
+    "commonStock": (0, 1e11),
+    "retainedEarnings": (-5e11, 5e11),  # Can be negative for companies with accumulated losses
+    "accumulatedOtherComprehensiveIncomeLoss": (-1e11, 1e11),
+    "othertotalStockholdersEquity": (-2e11, 2e11),
+    "totalStockholdersEquity": (-1e12, 1e12),  # Can be negative if accumulated losses exceed capital
+    "totalEquity": (-1e12, 1e12),
+    "totalLiabilitiesAndStockholdersEquity": (0, 3e12),
+    "minorityInterest": (-2e11, 2e11),
+    "totalLiabilitiesAndTotalEquity": (0, 3e12),
+    "totalInvestments": (-1e12, 1e12),
+    "totalDebt": (0, 1e12),
+    "netDebt": (-1e12, 1e12),  # Can be negative if cash > debt
     "calendarYear": None,
-    "reportedCurrency": None # This should be a string
+    "reportedCurrency": None  # This should be a string
 }
 
 def niceify_data():
@@ -119,7 +119,7 @@ def niceify_data():
                 if field not in to_not_scale_with_exchange_rate:
                     value = value / currency_exchange_rates[currency]
                 
-                if limit is not None and abs(value) > limit:
+                if limit is not None and (value < limit[0] or value > limit[1]):
                     is_valid = False
                     invalid_counter += 1
                     break

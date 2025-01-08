@@ -379,7 +379,7 @@ def test():
 
 
 
-    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='netIncome', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
+    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='epsdiluted', input_fields=fields, output_fields=OUTPUT_VECTOR_FIELDS)
 
     return gradients
 
