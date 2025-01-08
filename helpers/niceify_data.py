@@ -74,8 +74,35 @@ FIELDS_AND_LIMITS = {
     "totalInvestments": (-1e12, 1e12),
     "totalDebt": (0, 1e12),
     "netDebt": (-1e12, 1e12),  # Can be negative if cash > debt
+    'deferredIncomeTax': (-1e9, 1e9),
+    'stockBasedCompensation': (0, 1e10),
+    'changeInWorkingCapital': (-1e10, 1e10),
+    'accountsReceivables': (-5e9, 5e9),
+    'accountsPayables': (-5e9, 5e9),
+    'otherWorkingCapital': (-5e9, 5e9),
+    'otherNonCashItems': (-1e10, 1e10),
+    'netCashProvidedByOperatingActivities': (-2e10, 2e10),
+    'investmentsInPropertyPlantAndEquipment': (-5e10, 0),
+    'acquisitionsNet': (-1e11, 0),
+    'purchasesOfInvestments': (-1e11, 0),
+    'salesMaturitiesOfInvestments': (0, 1e11),
+    'otherInvestingActivites': (-1e10, 1e10),
+    'netCashUsedForInvestingActivites': (-1e11, 1e11),
+    'debtRepayment': (-5e10, 0),
+    'commonStockIssued': (0, 5e10),
+    'commonStockRepurchased': (-5e10, 0),
+    'dividendsPaid': (-5e10, 0),
+    'otherFinancingActivites': (-1e10, 1e10),
+    'netCashUsedProvidedByFinancingActivities': (-5e10, 5e10),
+    'effectOfForexChangesOnCash': (-5e9, 5e9),
+    'netChangeInCash': (-1e11, 1e11),
+    'cashAtEndOfPeriod': (0, 2e11),
+    'cashAtBeginningOfPeriod': (0, 2e11),
+    'operatingCashFlow': (-2e10, 2e10),
+    'capitalExpenditure': (-5e10, 0),
+    'freeCashFlow': (-1e11, 1e11),
     "calendarYear": None,
-    "reportedCurrency": None  # This should be a string
+    "reportedCurrency": None,  # This should be a string
 }
 
 def nanstd(x): 
@@ -83,7 +110,7 @@ def nanstd(x):
 
 def niceify_data():
     financial_statements = {}
-    for i in range(1):
+    for i in range(26):
         with open(f'data/full_reports_{i}.json', 'r+') as file:
             to_add = json.load(file)
             financial_statements = {**financial_statements, **to_add}
@@ -111,7 +138,7 @@ def niceify_data():
             currency = statement['reportedCurrency']
             if currency not in currency_indices:
                 continue
-            statement['reportedCurrency'] = currency_indices[currency]
+            statement['reportedCurrency'] = currency_indices[currency] + 1
             vector = []
             for field, limit in FIELDS_AND_LIMITS.items():
                 value = statement[field]
@@ -141,9 +168,10 @@ def niceify_data():
     all_financial_statements = torch.tensor(all_financial_statements)
     all_financial_statements = torch.nan_to_num(all_financial_statements, nan=0.0, posinf=0.0, neginf=0.0)
     mask = all_financial_statements[:,:-1] != 0
-    all_financial_statements[:,:-1][~mask] = float('nan')
-    mean = torch.nanmean(all_financial_statements[:,:-1], dim=0)
-    std = 1
+    # all_financial_statements[:,:-1][~mask] = float('nan')
+    # mean = torch.nanmean(all_financial_statements[:,:-1], dim=0)
+    # std = 1
+    std, mean = torch.std_mean(all_financial_statements[:,:-1], dim=0)
     std = torch.cat((std, torch.tensor(1).unsqueeze(0)), -1)
     mean = torch.cat((mean, torch.tensor(0).unsqueeze(0)), -1)
 
@@ -152,7 +180,9 @@ def niceify_data():
         if reports.shape[0] == 0:
             continue
         mask = reports != 0
+        reports[~mask] = float('nan')
         reports = (reports - mean) / std
+        reports = torch.nan_to_num(reports, nan=0.0, posinf=0.0, neginf=0.0)
         normalized_data.append(reports)
 
     print(f'Share of invalid data: {invalid_counter/general_counter}')
