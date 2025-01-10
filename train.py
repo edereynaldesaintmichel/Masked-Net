@@ -10,21 +10,23 @@ from torch.nn import functional as F
 
 # Hyperparams
 BATCH_SIZE = 512
-LEARNING_RATE = 1e-3
-NUM_EPOCHS = 50
+LEARNING_RATE = 1e-4
+NUM_EPOCHS = 100
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_DROPOUT_PROB = 0.0
+MAX_DROPOUT_PROB = 0.1
 NUM_INPUT_FIELDS = 32
 BAD_EXAMPLE_CUTOFF = 20
+WEIGHT_DECAY = 0.0
 
 # Fields to predict:
 # OUTPUT_VECTOR_FIELDS = ["interestIncome", "interestExpense", "ebitda", "operatingIncome", "incomeBeforeTax", "netIncome", "eps", "epsdiluted",] # These output fields are for net_income_and_stuff_model.pt
 INPUT_FIELDS = ["revenue", "costOfRevenue", "grossProfit", "grossProfitRatio", "researchAndDevelopmentExpenses", "generalAndAdministrativeExpenses", "sellingAndMarketingExpenses", "sellingGeneralAndAdministrativeExpenses", "otherExpenses", "operatingExpenses", "costAndExpenses", "interestIncome", "interestExpense", "depreciationAndAmortization", "ebitda", "ebitdaratio", "operatingIncome", "operatingIncomeRatio", "totalOtherIncomeExpensesNet", "incomeBeforeTax", "incomeBeforeTaxRatio", "incomeTaxExpense", "netIncome", "netIncomeRatio", "eps", "epsdiluted", "weightedAverageShsOut", "weightedAverageShsOutDil", "cashAndCashEquivalents", "shortTermInvestments", "cashAndShortTermInvestments", "netReceivables", "inventory", "otherCurrentAssets", "totalCurrentAssets", "propertyPlantEquipmentNet", "goodwill", "intangibleAssets", "goodwillAndIntangibleAssets", "longTermInvestments", "taxAssets", "otherNonCurrentAssets", "totalNonCurrentAssets", "otherAssets", "totalAssets", "accountPayables", "shortTermDebt", "taxPayables", "deferredRevenue", "otherCurrentLiabilities", "totalCurrentLiabilities", "longTermDebt", "deferredRevenueNonCurrent", "deferredTaxLiabilitiesNonCurrent", "otherNonCurrentLiabilities", "totalNonCurrentLiabilities", "otherLiabilities", "capitalLeaseObligations", "totalLiabilities", "preferredStock", "commonStock", "retainedEarnings", "accumulatedOtherComprehensiveIncomeLoss", "othertotalStockholdersEquity", "totalStockholdersEquity", "totalEquity", "totalLiabilitiesAndStockholdersEquity", "minorityInterest", "totalLiabilitiesAndTotalEquity", "totalInvestments", "totalDebt", "netDebt", "deferredIncomeTax", "stockBasedCompensation", "changeInWorkingCapital", "accountsReceivables", "accountsPayables", "otherWorkingCapital", "otherNonCashItems", "netCashProvidedByOperatingActivities", "investmentsInPropertyPlantAndEquipment", "acquisitionsNet", "purchasesOfInvestments", "salesMaturitiesOfInvestments", "otherInvestingActivites", "netCashUsedForInvestingActivites", "debtRepayment", "commonStockIssued", "commonStockRepurchased", "dividendsPaid", "otherFinancingActivites", "netCashUsedProvidedByFinancingActivities", "effectOfForexChangesOnCash", "netChangeInCash", "cashAtEndOfPeriod", "cashAtBeginningOfPeriod", "operatingCashFlow", "capitalExpenditure", "freeCashFlow", "calendarYear", "reportedCurrency"]
 
-OUTPUT_VECTOR_FIELDS = ["revenue", "netIncome", "netIncomeRatio", "eps", "epsdiluted", "freeCashFlow", "totalDebt", "cashAndShortTermInvestments", "totalStockholdersEquity", "operatingCashFlow", "dividendsPaid"]
+OUTPUT_VECTOR_FIELDS = ["revenue", "netIncome", "eps", "epsdiluted", "freeCashFlow", "totalStockholdersEquity", "operatingCashFlow", "dividendsPaid"]
+# OUTPUT_VECTOR_FIELDS = ["totalStockholdersEquity"]
 
 
-torch.manual_seed(42)
+# torch.manual_seed(42)
 
 std, mean = 1, 1
 
@@ -35,12 +37,14 @@ class MaskedLayer(nn.Module):
         self.values_proj = nn.Linear(in_features, out_features)
         self.interpolation = nn.Linear(in_features, out_features)
         self.mask_transform = nn.Linear(in_features, out_features, bias=False)
-        nn.init.normal_(self.mask_transform.weight, std=0.01)
+        # self.leaky_relu = nn.LeakyReLU()
+        nn.init.normal_(self.mask_transform.weight, std=0.02)
 
     def forward(self, values, mask):
         out = self.values_proj(values)
         interpolations = self.interpolation(values)
         mask = self.mask_transform(mask)
+        # mask = self.leaky_relu(mask)
         out += interpolations * mask
         return out, mask
     
@@ -63,11 +67,11 @@ class MaskedNet(nn.Module):
         self.currency_embedding = nn.Embedding(num_embeddings=number_of_currencies, embedding_dim=2)
         # self.customDataAugmentation = CustomDataAugmentation()
         self.lm_head = MaskedSequential(
-            MaskedLayer(input_size + 1, input_size//4),
+            MaskedLayer(input_size + 1, input_size//8),
             nn.LeakyReLU(),
-            MaskedLayer(input_size//4, input_size//4),
+            nn.Linear(input_size//8, input_size//8),
             nn.LeakyReLU(),
-            nn.Linear(input_size//4, output_size)
+            nn.Linear(input_size//8, output_size)
         )
 
     def forward(self, input, targets=None, clean_dataset=False):
@@ -95,7 +99,13 @@ class MaskedNet(nn.Module):
 #         super().__init__()
 #         self.currency_embedding = nn.Embedding(num_embeddings=number_of_currencies, embedding_dim=2)
 #         self.lm_head = nn.Sequential(
-#             nn.Linear(input_size + 1, input_size//4),
+#             nn.Linear(input_size + 1, input_size*4),
+#             nn.LeakyReLU(),
+#             nn.Linear(input_size*4, input_size//4),
+#             nn.LeakyReLU(),
+#             nn.Linear(input_size//4, input_size//4),
+#             nn.LeakyReLU(),
+#             nn.Linear(input_size//4, input_size//4),
 #             nn.LeakyReLU(),
 #             nn.Linear(input_size//4, input_size//4),
 #             nn.LeakyReLU(),
@@ -134,7 +144,7 @@ def get_val_dataloader(full_dataset, output_field_indices, batch_size):
         if to_append[mask].shape[0] > to_append.shape[0]*0.5:
             excluded_counter += 1
             continue
-        input_data.append(torch.flatten(to_append))
+        input_data.append(to_append)
         sub_ground_truth = torch.index_select(company_statements[-1], dim=-1, index=output_field_indices)
         ground_truth.append(sub_ground_truth)
 
@@ -156,7 +166,7 @@ def get_train_dataloader(full_dataset, output_field_indices, batch_size):
                 continue
             total_counter += 1
             to_append = torch.flatten(company_statements[-i-5:-i-2])
-            # mask = to_append == 0
+            mask = to_append == 0
             # if to_append[mask].shape[0] > to_append.shape[0]*0.5:
             #     excluded_counter += 1
             #     continue
@@ -293,8 +303,44 @@ def get_output_gradients(model, val_loader, device, output_field:str, input_fiel
     all_gradients_sum = all_gradients.sum(dim=0)
     all_gradients_sum /= all_gradients_sum.max()
     full_gradients_dict = {key: (float(all_gradients_sum[value]), float(all_gradients_sum[value+len(INPUT_FIELDS)]), float(all_gradients_sum[value+len(INPUT_FIELDS)*2])) for key, value in input_dict.items()}
-
+    csv_string = '"Metric", "n-3", "n-2", "n-1"\n'
+    for metric, values in full_gradients_dict.items():
+        csv_string += f'"{metric}", {values[0]}, {values[1]}, {values[2]}\n'
+    print(csv_string)
     return full_gradients_dict
+
+
+def get_predictibility(model, val_loader, device, output_fields:list[str], input_fields:list[str]):
+    model.eval()
+    total_loss = 0
+    total_length = 0
+    total_target_loss = 0
+    output_data_indices = [input_fields.index(field) for field in output_fields]
+    target_losses = torch.zeros(len(output_fields))
+    attained_losses = torch.zeros(len(output_fields))
+    composite_losses = torch.zeros(len(output_fields))
+    predictibility = {}
+
+    with torch.no_grad():
+        for data, targets in val_loader:
+            data, targets = data.to(device), targets.to(device)
+            output, _ = model(data, targets)
+            length = data.shape[0]
+            for output_index, input_index in enumerate(output_data_indices):
+                carry_over_data = data[:, len(input_fields) * 2 + input_index]
+                target_losses[output_index] += F.l1_loss(carry_over_data, targets[:,output_index]).item() * length
+                attained_losses[output_index] += F.l1_loss(output[:,output_index], targets[:,output_index]).item() * length
+                composite_losses[output_index] += F.l1_loss((output[:,output_index] + carry_over_data*2.5)/3.5, targets[:,output_index]).item() * length
+
+            total_length += length
+            
+        target_losses /= total_length
+        attained_losses /= total_length
+        composite_losses /= total_length
+
+        predictibility = {field: (float(target_losses[index]), float(attained_losses[index]), float(composite_losses[index])) for index, field in enumerate(output_fields)}
+
+    return predictibility
 
 
 def train():
@@ -312,12 +358,13 @@ def train():
         number_of_currencies=47,
         dropout_prob=MAX_DROPOUT_PROB,
     ).to(DEVICE)
+    # model.load_state_dict(torch.load('test_model.pt', map_location=torch.device('cpu')))
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total trainable parameters: {total_params}")
 
     # Initialize optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
     # Training loop
     best_val_loss = float('inf')
@@ -355,14 +402,14 @@ def test():
     ).to(DEVICE)
 
 
-    model.load_state_dict(torch.load('test_model.pt', map_location=torch.device('cpu')))
-    std = torch.load('std.pt')
-    mean = torch.load('mean.pt')
-    currency_indices = torch.load('currency_indices.pt')
-    currency_exchange_rates = torch.load('currency_exchange_rates.pt')
+    model.load_state_dict(torch.load('blog_post_model.pt', map_location=torch.device('cpu')))
+    # std = torch.load('std.pt')
+    # mean = torch.load('mean.pt')
+    # currency_indices = torch.load('currency_indices.pt')
+    # currency_exchange_rates = torch.load('currency_exchange_rates.pt')
 
 
-
+    pred = get_predictibility(model, val_data_loader, DEVICE, input_fields=INPUT_FIELDS, output_fields=OUTPUT_VECTOR_FIELDS)
     gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='netIncome', input_fields=INPUT_FIELDS, output_fields=OUTPUT_VECTOR_FIELDS)
 
     return gradients
