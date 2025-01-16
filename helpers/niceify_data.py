@@ -145,14 +145,14 @@ def niceify_data():
                 try:
                     value = float(value)
                 except:
-                    value = 0.0
+                    value = -1
                 if field not in to_not_scale_with_exchange_rate:
                     value = value / currency_exchange_rates[currency]
                 
                 if limit is not None and (value < limit[0] or value > limit[1]):
                     # is_valid = False
                     invalid_counter += 1
-                    value = 0
+                    value = -1
                     # break
 
                 vector.append(value)
@@ -167,7 +167,7 @@ def niceify_data():
 
     all_financial_statements = torch.tensor(all_financial_statements)
     all_financial_statements = torch.nan_to_num(all_financial_statements, nan=0.0, posinf=0.0, neginf=0.0)
-    mask = all_financial_statements[:,:-1] != 0
+    mask1 = all_financial_statements[:,:-1] != 0
     # all_financial_statements[:,:-1][~mask] = float('nan')
     # mean = torch.nanmean(all_financial_statements[:,:-1], dim=0)
     # std = 1
@@ -179,12 +179,14 @@ def niceify_data():
     for reports in data:
         if reports.shape[0] == 0:
             continue
-        mask = reports != 0
+        mask1 = reports != -1
+        mask2 = reports != 0
         # if (torch.numel(reports[~mask]) > torch.numel(reports) * 0.3):
         #     continue
-        reports[~mask] = float('nan')
+        reports[~mask1] = float('nan')
+        reports[~mask2] = float('inf')
         reports = (reports - mean) / std
-        reports = torch.nan_to_num(reports, nan=0.0, posinf=0.0, neginf=0.0)
+        reports = torch.nan_to_num(reports, nan=0.0, posinf=-0.01, neginf=-0.01)
         reports = reports.flip(dims=(0,))
         normalized_data.append(reports)
 

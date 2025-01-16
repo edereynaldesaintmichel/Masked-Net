@@ -10,10 +10,10 @@ from torch.nn import functional as F
 
 # Hyperparams
 BATCH_SIZE = 512
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 NUM_EPOCHS = 100
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_DROPOUT_PROB = 0.1
+MAX_DROPOUT_PROB = 0.0
 NUM_INPUT_FIELDS = 32
 BAD_EXAMPLE_CUTOFF = 20
 WEIGHT_DECAY = 0.0
@@ -26,37 +26,46 @@ OUTPUT_VECTOR_FIELDS = ["revenue", "netIncome", "eps", "epsdiluted", "freeCashFl
 # OUTPUT_VECTOR_FIELDS = ["totalStockholdersEquity"]
 
 
-# torch.manual_seed(42)
+torch.manual_seed(42)
 
 std, mean = 1, 1
+
+# Objectif: 1350. Impossible à battre, certes, mais on va tenter.
 
 
 class MaskedLayer(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
-        self.values_proj = nn.Linear(in_features, out_features)
-        self.interpolation = nn.Linear(in_features, out_features)
-        self.mask_transform = nn.Linear(in_features, out_features, bias=False)
-        # self.leaky_relu = nn.LeakyReLU()
-        nn.init.normal_(self.mask_transform.weight, std=0.02)
+        self.values_proj = nn.Linear(in_features, out_features, bias=False)
+        self.result_proj_1 = nn.Linear(3*out_features, out_features, bias=False)
+        self.result_proj_2 = nn.Linear(out_features, 3*out_features, bias=False)
+        self.bias = nn.Parameter(torch.zeros(out_features*3))
+        self.leaky_relu = nn.LeakyReLU()
+        self.out_features = out_features  # Store out_features for splitting
 
-    def forward(self, values, mask):
-        out = self.values_proj(values)
-        interpolations = self.interpolation(values)
-        mask = self.mask_transform(mask)
-        # mask = self.leaky_relu(mask)
-        out += interpolations * mask
-        return out, mask
+    def forward(self, values, mask_zero, mask_invalid):     
+        general_vector = torch.cat((self.values_proj(values), self.values_proj(mask_zero), self.values_proj(mask_invalid)), dim=1)
+        
+        out = self.result_proj_2(self.result_proj_1(general_vector))
+        out = out + self.bias
+        out = self.leaky_relu(out)
+        
+        # Split the output into three equal parts
+        values_out = out[:, :self.out_features]
+        mask_zero_out = out[:, self.out_features:2*self.out_features]
+        mask_invalid_out = out[:, 2*self.out_features:]
+
+        return values_out, mask_zero_out, mask_invalid_out
     
 class MaskedSequential(nn.Module):
     def __init__(self, *layers):
         super().__init__()
         self.layers = nn.ModuleList(layers)
         
-    def forward(self, x, mask):
+    def forward(self, x, mask_zero, mask_invalid):
         for layer in self.layers:
             if isinstance(layer, MaskedLayer):
-                x, mask = layer(x, mask)
+                x, mask_zero, mask_invalid = layer(x, mask_zero, mask_invalid)
             else:
                 x = layer(x)
         return x
@@ -65,25 +74,24 @@ class MaskedNet(nn.Module):
     def __init__(self, input_size, output_size, number_of_currencies, dropout_prob=0.1):
         super().__init__()
         self.currency_embedding = nn.Embedding(num_embeddings=number_of_currencies, embedding_dim=2)
-        # self.customDataAugmentation = CustomDataAugmentation()
+        self.dropout = nn.Dropout(MAX_DROPOUT_PROB)
         self.lm_head = MaskedSequential(
             MaskedLayer(input_size + 1, input_size//8),
-            nn.LeakyReLU(),
-            nn.Linear(input_size//8, input_size//8),
-            nn.LeakyReLU(),
-            nn.Linear(input_size//8, output_size)
+            MaskedLayer(input_size//8, input_size//12),
+            nn.Linear(input_size//12, output_size)
         )
 
     def forward(self, input, targets=None, clean_dataset=False):
         main_features = input[:, :-1]
-        mask = (main_features == 0).float()
-        # main_features, targets = self.customDataAugmentation(main_features, targets)
+        mask_invalid = (main_features == 0).float()
+        mask_zero = (main_features == -.01).float()
         currency_idx = input[:, -1].long()
         currency_embedding = self.currency_embedding(currency_idx)
         combined_input = torch.cat([main_features, currency_embedding], dim=1)
-        mask = torch.cat([mask, torch.zeros(mask.shape[0], 2)], dim=1)
+        mask_invalid = torch.cat([mask_invalid, torch.zeros(mask_invalid.shape[0], 2)], dim=1)
+        mask_zero = torch.cat([mask_zero, torch.zeros(mask_zero.shape[0], 2)], dim=1)
 
-        output = self.lm_head(combined_input, mask)
+        output = self.lm_head(combined_input, mask_zero, mask_invalid)
 
         if targets is None:
             return output, None
@@ -99,15 +107,12 @@ class MaskedNet(nn.Module):
 #         super().__init__()
 #         self.currency_embedding = nn.Embedding(num_embeddings=number_of_currencies, embedding_dim=2)
 #         self.lm_head = nn.Sequential(
-#             nn.Linear(input_size + 1, input_size*4),
+#             nn.Dropout(MAX_DROPOUT_PROB),
+#             nn.Linear(input_size + 1, input_size//3),
 #             nn.LeakyReLU(),
-#             nn.Linear(input_size*4, input_size//4),
+#             nn.Linear(input_size//3, input_size//3),
 #             nn.LeakyReLU(),
-#             nn.Linear(input_size//4, input_size//4),
-#             nn.LeakyReLU(),
-#             nn.Linear(input_size//4, input_size//4),
-#             nn.LeakyReLU(),
-#             nn.Linear(input_size//4, input_size//4),
+#             nn.Linear(input_size//3, input_size//4),
 #             nn.LeakyReLU(),
 #             nn.Linear(input_size//4, output_size)
 #         )
@@ -402,7 +407,7 @@ def test():
     ).to(DEVICE)
 
 
-    model.load_state_dict(torch.load('blog_post_model.pt', map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load('test_model.pt', map_location=torch.device('cpu')))
     # std = torch.load('std.pt')
     # mean = torch.load('mean.pt')
     # currency_indices = torch.load('currency_indices.pt')
@@ -410,12 +415,49 @@ def test():
 
 
     pred = get_predictibility(model, val_data_loader, DEVICE, input_fields=INPUT_FIELDS, output_fields=OUTPUT_VECTOR_FIELDS)
-    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='netIncome', input_fields=INPUT_FIELDS, output_fields=OUTPUT_VECTOR_FIELDS)
+    gradients = get_output_gradients(model, val_data_loader, DEVICE, output_field='freeCashFlow', input_fields=INPUT_FIELDS, output_fields=OUTPUT_VECTOR_FIELDS)
 
     return gradients
+
+
+def get_layers_condition_number():
+    """
+    Calculate condition numbers for each layer in the neural network model.
+    
+    Returns:
+        dict: Dictionary containing condition numbers for each layer's weight matrix
+    """
+    # Load the model
+    model = MaskedNet(
+        input_size=3*len(INPUT_FIELDS),
+        output_size=len(OUTPUT_VECTOR_FIELDS),
+        number_of_currencies=47,
+        dropout_prob=MAX_DROPOUT_PROB,
+    )
+    
+    # Load the state dict
+    model.load_state_dict(torch.load('test_model.pt', map_location=torch.device('cpu')))
+    
+    condition_numbers = {}
+    for name, parameter in model.named_parameters():
+        if 'weight' in name:
+            weight_matrix = parameter.data
+            
+            # Calculate SVD
+            try:
+                U, S, V = torch.svd(weight_matrix)
+                condition_number = S[0] / S[-1]
+                
+                condition_numbers[name] = condition_number.item()
+            except:
+                condition_numbers[name] = float('inf')
+    
+    return condition_numbers
+
 
 if __name__ == '__main__':
 
     # train()
     test()
+    get_layers_condition_number()
 
