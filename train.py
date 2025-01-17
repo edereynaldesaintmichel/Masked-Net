@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 # Hyperparams
 BATCH_SIZE = 512
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 0.5e-3
 NUM_EPOCHS = 100
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 MAX_DROPOUT_PROB = 0.0
@@ -36,16 +36,22 @@ std, mean = 1, 1
 class MaskedLayer(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
-        self.values_proj = nn.Linear(in_features, out_features, bias=False)
+        self.main_proj = nn.Linear(in_features, out_features, bias=False)
+        # LoRA projections
         self.result_proj_1 = nn.Linear(3*out_features, out_features, bias=False)
         self.result_proj_2 = nn.Linear(out_features, 3*out_features, bias=False)
+        # general bias, saving the bias params of the previous layers
         self.bias = nn.Parameter(torch.zeros(out_features*3))
+        # non-linearity
         self.leaky_relu = nn.LeakyReLU()
-        self.out_features = out_features  # Store out_features for splitting
+        # stored for output splitting
+        self.out_features = out_features
 
     def forward(self, values, mask_zero, mask_invalid):     
-        general_vector = torch.cat((self.values_proj(values), self.values_proj(mask_zero), self.values_proj(mask_invalid)), dim=1)
+        # Weight sharing, very similar to a 1D convo with out_features filters. Full rank *local* operation with limited number of parameters.
+        general_vector = torch.cat((self.main_proj(values), self.main_proj(mask_zero), self.main_proj(mask_invalid)), dim=1)
         
+        # Low (relatively speaking) rank operation with lots of interaction between all the input components. Exactly the opposite of the previous step.
         out = self.result_proj_2(self.result_proj_1(general_vector))
         out = out + self.bias
         out = self.leaky_relu(out)
@@ -83,8 +89,8 @@ class MaskedNet(nn.Module):
 
     def forward(self, input, targets=None, clean_dataset=False):
         main_features = input[:, :-1]
-        mask_invalid = (main_features == 0).float()
-        mask_zero = (main_features == -.01).float()
+        mask_invalid = (main_features == -.01).float()
+        mask_zero = (main_features == 0).float()
         currency_idx = input[:, -1].long()
         currency_embedding = self.currency_embedding(currency_idx)
         combined_input = torch.cat([main_features, currency_embedding], dim=1)
@@ -457,7 +463,7 @@ def get_layers_condition_number():
 
 if __name__ == '__main__':
 
-    # train()
-    test()
-    get_layers_condition_number()
+    train()
+    # test()
+    # get_layers_condition_number()
 
