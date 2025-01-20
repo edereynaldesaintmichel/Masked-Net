@@ -30,8 +30,6 @@ torch.manual_seed(42)
 
 std, mean = 1, 1
 
-# Objectif: 1350. Impossible à battre, certes, mais on va tenter.
-
 
 class MaskedLayer(nn.Module):
     def __init__(self, in_features, out_features):
