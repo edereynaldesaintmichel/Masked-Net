@@ -19,9 +19,9 @@ The core idea behind Masked-Net is to explicitly handle missing/invalid values (
 
     where `main_proj` is a shared, learned projection matrix.  This shared projection acts like a learned 1D convolution, extracting features relevant to both the values and their validity.
 
-3.  **Shared Projection (Convolution Analogy):**  The use of the *same* `main_proj` matrix for all three components (values, invalid mask, zero mask) is a key innovation.  This is analogous to a 1D convolution with `out_features` filters, `in_features` stride, and a filter size of 1.  The `main_proj` matrix learns filters that effectively process both the main values and the information encoded in the masks, maximizing information retention.
+3.  **Shared Projection (Convolution Analogy):**  The use of the *same* `main_proj` matrix for all three components (values, invalid mask, zero mask) is a key innovation.  This is analogous to a 1D convolution with `out_features` filters, `in_features` stride, and a filter size of 1.
 
-4.  **LoRA for Global Interactions:**  The output of the concatenated projection is then passed through a linear layer, followed by a LeakyReLU activation.  To further enhance parameter efficiency, Low-Rank Approximation (LoRA) is applied to the linear layer's transformation matrix (`result_proj`).  This captures global feature interactions with a low-rank representation, promoting generalization and reducing overfitting. The LoRA is implemented before the activation function.
+4.  **LoRA for Global Interactions:**  The output of the concatenated projection is then passed through a linear layer, followed by a LeakyReLU activation.  To further enhance parameter efficiency, Low-Rank Approximation (LoRA) is applied to the linear layer's transformation matrix (`result_proj`).
 
     The combination of the shared projection (convolutional aspect) and LoRA allows the network to efficiently learn both local feature representations (via the convolution-like projection) and global feature dependencies (via LoRA).
 
@@ -35,7 +35,6 @@ Each Masked Layer's parameter count is a function of the input, output and LoRA 
 -   **Handles Missing Data Effectively:**  The explicit masking mechanism allows the network to treat missing/invalid data as distinct from genuine near-zero values, improving prediction accuracy in sparse datasets.
 -   **Parameter Efficiency:**  The shared projection matrix and LoRA significantly reduce the number of parameters compared to a standard MLP, mitigating overfitting, especially on smaller datasets.
 -   **Improved Generalization:**  The architecture's design, combining convolutional principles with LoRA, encourages the learning of robust features and relationships, leading to better generalization performance.
--    **Easy to use**: the implementation is very straightforward and consists of one custom layer.
 
 ## Data
 Please DM me to get the data. I can't make it available as it comes from a payed source.
